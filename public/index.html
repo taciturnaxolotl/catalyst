@@ -1,0 +1,347 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>ozone 4611 — ri48h overlay</title>
+<style>
+  @font-face {
+    font-family: "Archivo";
+    src: url("/fonts/Archivo-var.woff2") format("woff2-variations");
+    font-weight: 100 900;
+    font-stretch: 62% 125%;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: "Archivo";
+    src: url("/fonts/Archivo-Italic-var.woff2") format("woff2-variations");
+    font-weight: 100 900;
+    font-stretch: 62% 125%;
+    font-style: italic;
+  }
+
+  :root {
+    --navy: #003087;
+    --navy-deep: #00205c;
+    --silver: #a5a8bc;
+    --green: #25b001;
+    --ink: #000;
+    --paper: #fff;
+  }
+
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+  }
+  body {
+    font-family: "Archivo", "Arial Narrow", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* fixed 1920x1080 stage, scaled to whatever the browser source is */
+  #stage {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 1920px;
+    height: 1080px;
+    transform-origin: top left;
+  }
+
+  .edge {
+    position: absolute;
+  }
+  .tl {
+    top: 44px;
+    left: 52px;
+  }
+  .tr {
+    top: 44px;
+    right: 52px;
+  }
+  .br {
+    bottom: 36px;
+    right: 44px;
+  }
+  .bc {
+    bottom: 44px;
+    left: 52px;
+  }
+
+  /* sticker-patch construction, straight off the team logo:
+     black outline, silver keyline, drop shadow */
+  .patch {
+    border-radius: 14px;
+    box-shadow:
+      0 0 0 5px var(--ink),
+      0 0 0 9px var(--silver),
+      0 12px 26px rgba(0, 0, 0, 0.5);
+  }
+
+  /* ---------- build clock ---------- */
+  #timer {
+    background: linear-gradient(180deg, var(--navy) 0%, var(--navy-deep) 100%);
+    padding: 14px 34px 18px;
+    color: var(--paper);
+    transition: opacity 0.25s;
+  }
+  #timerLabel {
+    font-style: italic;
+    font-weight: 700;
+    font-stretch: 88%;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--silver);
+    margin-bottom: 6px;
+  }
+  #clock {
+    font-style: italic;
+    font-weight: 800;
+    font-stretch: 85%;
+    font-size: 112px;
+    line-height: 0.92;
+    letter-spacing: -0.015em;
+    text-shadow: 0 4px 0 rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+  }
+  #clock.done {
+    color: var(--green);
+  }
+  #timer.paused #timerLabel::after {
+    content: " — paused";
+    color: var(--green);
+  }
+
+  /* ---------- chips ---------- */
+  #chips {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 22px;
+    align-items: flex-start;
+  }
+  .chip {
+    display: flex;
+    align-items: center;
+    background: #0a0a0a;
+    color: var(--paper);
+    padding: 0 26px 0 0;
+    overflow: hidden;
+    animation: chipIn 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  }
+  .chip .bar {
+    width: 12px;
+    align-self: stretch;
+    background: var(--paper);
+    margin-right: 20px;
+  }
+  .chip[data-tone="recap"] .bar {
+    background: var(--green);
+  }
+  .chip[data-tone="info"] .bar {
+    background: var(--navy);
+  }
+  .chip .txt {
+    font-style: italic;
+    font-weight: 700;
+    font-stretch: 90%;
+    font-size: 34px;
+    padding: 13px 0 15px;
+    white-space: nowrap;
+    color: var(--silver);
+  }
+  .chip .val {
+    font-weight: 800;
+    color: var(--paper);
+    margin-left: 12px;
+  }
+  .chip[data-tone="recap"] .val {
+    color: var(--green);
+  }
+  .chip.imminent .val {
+    animation: blink 1s steps(1, end) infinite;
+  }
+  @keyframes chipIn {
+    from {
+      opacity: 0;
+      transform: translateX(-28px);
+    }
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0.25;
+    }
+  }
+
+  /* ---------- sponsor ---------- */
+  #sponsor {
+    background: var(--paper);
+    padding: 12px 22px 14px;
+    text-align: center;
+    transition: opacity 0.25s;
+  }
+  #sponsorCaption {
+    font-style: italic;
+    font-weight: 700;
+    font-stretch: 90%;
+    font-size: 20px;
+    color: #5a5d6b;
+    margin-bottom: 6px;
+  }
+  #sponsor img {
+    display: block;
+    width: 240px;
+  }
+
+  /* ---------- corner logo + ticker ---------- */
+  #logo {
+    width: 210px;
+    filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+  }
+  #ticker {
+    background: #0a0a0a;
+    color: var(--paper);
+    padding: 12px 28px 14px;
+    font-style: italic;
+    font-weight: 600;
+    font-stretch: 92%;
+    font-size: 30px;
+    max-width: 1100px;
+  }
+
+  .hide {
+    display: none !important;
+  }
+</style>
+
+<div id="stage">
+  <div class="edge tl">
+    <div id="timer" class="patch">
+      <div id="timerLabel">build time left</div>
+      <div id="clock">--:--:--</div>
+    </div>
+    <div id="chips"></div>
+  </div>
+
+  <div class="edge tr">
+    <div id="sponsor" class="patch">
+      <div id="sponsorCaption">sheet metal by</div>
+      <img src="/assets/oshcut.png" alt="OshCut" />
+    </div>
+  </div>
+
+  <div class="edge bc"><div id="ticker" class="patch hide"></div></div>
+  <div class="edge br"><img id="logo" src="/assets/ozone-logo.png" alt="Ozone Robotics 4611" /></div>
+</div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  let state = null,
+    skew = 0; // server epoch − local epoch, so a laptop with a wrong clock still agrees
+  const now = () => Date.now() + skew;
+
+  function fit() {
+    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+    $("#stage").style.transform = `scale(${s})`;
+  }
+  addEventListener("resize", fit);
+  fit();
+
+  // ---- ws with infinite reconnect; overlay keeps ticking on last state ----
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws.onmessage = (e) => {
+      state = JSON.parse(e.data);
+      if (state.t) skew = state.t - Date.now();
+      render();
+    };
+    ws.onclose = () => setTimeout(connect, 1000);
+    ws.onerror = () => ws.close();
+  }
+  connect();
+
+  function hms(ms) {
+    const t = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(t / 3600),
+      m = Math.floor((t % 3600) / 60),
+      s = t % 60;
+    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+  }
+
+  // "20 min" / "1h 05m" / "45s" / "now"
+  function until(ms) {
+    if (ms <= 0) return "now";
+    const t = Math.round(ms / 1000);
+    if (t < 60) return `${t}s`;
+    const m = Math.round(t / 60);
+    if (m < 60) return `${m} min`;
+    return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+  }
+
+  // repeating callouts roll forward as a pure function of state — no server tick,
+  // so every tab lands on the same target even after a hibernated socket wakes up
+  function effAt(ch, t) {
+    if (ch.at === null) return null;
+    if (!ch.repeat) return ch.at;
+    const step = ch.repeat * 60000;
+    return ch.at <= t - 60000 ? ch.at + Math.ceil((t - 60000 - ch.at) / step) * step : ch.at;
+  }
+
+  function render() {
+    if (!state) return;
+    const now = Date.now() + skew;
+
+    // build clock
+    const t = $("#timer");
+    t.classList.toggle("hide", !state.show.timer);
+    t.classList.toggle("paused", state.build.paused);
+    $("#timerLabel").textContent = state.build.label;
+    const left = state.build.paused ? state.build.remainingMs : (state.build.endsAt ?? now) - now;
+    const c = $("#clock");
+    c.classList.toggle("done", left <= 0);
+    c.textContent = left <= 0 ? "00:00:00" : hms(left);
+
+    // chips
+    const box = $("#chips");
+    const want = state.chips.filter(
+      (ch) => ch.visible && (ch.at === null || ch.repeat > 0 || ch.at - now > -120000),
+    );
+    for (const el of [...box.children]) if (!want.find((w) => w.id === el.dataset.id)) el.remove();
+    for (const ch of want) {
+      let el = box.querySelector(`[data-id="${ch.id}"]`);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "chip patch";
+        el.dataset.id = ch.id;
+        el.innerHTML = `<div class="bar"></div><div class="txt"></div>`;
+        box.append(el);
+      }
+      el.dataset.tone = ch.tone;
+      const tgt = effAt(ch, now);
+      const rem = tgt === null ? null : tgt - now;
+      el.classList.toggle("imminent", rem !== null && rem <= 60000);
+      el.querySelector(".txt").innerHTML =
+        rem === null ? esc(ch.label) : `${esc(ch.label)} <span class="val">${until(rem)}</span>`;
+    }
+    // only touch the dom when the order actually changed — re-appending restarts the css animation
+    const have = [...box.children].map((e) => e.dataset.id).join(",");
+    if (have !== want.map((c) => c.id).join(",")) {
+      want.forEach((ch) => box.append(box.querySelector(`[data-id="${ch.id}"]`)));
+    }
+
+    // sponsor + logo + ticker
+    $("#sponsor").classList.toggle("hide", !state.sponsor.visible);
+    $("#sponsorCaption").textContent = state.sponsor.caption;
+    $("#sponsorCaption").style.display = state.sponsor.caption ? "" : "none";
+    $("#logo").classList.toggle("hide", !state.show.logo);
+    const tk = $("#ticker");
+    tk.classList.toggle("hide", !state.ticker.visible || !state.ticker.text);
+    tk.textContent = state.ticker.text;
+  }
+
+  const esc = (s) => s.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]);
+  setInterval(render, 250);
+</script>

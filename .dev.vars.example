@@ -1,0 +1,2 @@
+# copy to .dev.vars for local dev. with no key set, every visitor is an operator.
+CONTROL_KEY=change-me

@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "catalyst-overlay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "OVERLAY", "class_name": "OverlayState" }]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      // sqlite-backed DOs are the ones available on the workers free plan
+      "new_sqlite_classes": ["OverlayState"]
+    }
+  ]
+}

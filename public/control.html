@@ -1,0 +1,419 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>catalyst — overlay control</title>
+<style>
+  @font-face {
+    font-family: "Archivo";
+    src: url("/fonts/Archivo-var.woff2") format("woff2-variations");
+    font-weight: 100 900;
+    font-stretch: 62% 125%;
+  }
+  :root {
+    --navy: #003087;
+    --silver: #a5a8bc;
+    --green: #25b001;
+    --bg: #0c0e14;
+    --card: #161a24;
+    --line: #262c3a;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    padding: 14px;
+    background: var(--bg);
+    color: #e8eaf0;
+    font-family: "Archivo", system-ui, sans-serif;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--silver);
+    margin: 0 0 10px;
+    letter-spacing: 0.02em;
+  }
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .row + .row {
+    margin-top: 10px;
+  }
+  input,
+  select,
+  button {
+    font: inherit;
+    font-family: inherit;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #0f131c;
+    color: inherit;
+    padding: 9px 11px;
+  }
+  input:focus-visible,
+  select:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 1px;
+  }
+  input[type="number"] {
+    width: 74px;
+  }
+  input[type="time"] {
+    width: 110px;
+  }
+  .grow {
+    flex: 1;
+    min-width: 90px;
+  }
+  button {
+    background: #1e2432;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover {
+    background: #2a3244;
+  }
+  button.go {
+    background: var(--navy);
+    border-color: #0a49c4;
+  }
+  button.go:hover {
+    background: #0a49c4;
+  }
+  button.on {
+    background: #12351c;
+    border-color: #2f7a2a;
+    color: #7fe36b;
+  }
+  button.on.live {
+    background: var(--green);
+    border-color: var(--green);
+    color: #06210b;
+  }
+  .chip button,
+  .chip select {
+    padding: 8px 10px;
+  }
+  .chip input[type="number"] {
+    width: 60px;
+  }
+  .chip input[type="time"] {
+    width: 104px;
+  }
+  button.danger:hover {
+    background: #5a1d1d;
+  }
+  #clock {
+    font-size: 46px;
+    font-weight: 800;
+    font-stretch: 85%;
+    line-height: 1;
+    margin: 2px 0 12px;
+  }
+  #clock.paused {
+    color: var(--silver);
+  }
+  .chip {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: #10141d;
+  }
+  .chip .eta {
+    color: var(--green);
+    font-weight: 700;
+    min-width: 62px;
+  }
+  .muted {
+    color: #79809a;
+  }
+  #conn {
+    float: right;
+    font-size: 12px;
+    color: var(--green);
+  }
+  #conn.down {
+    color: #ff5f56;
+  }
+</style>
+
+<section>
+  <h2>build clock <span id="conn">live</span></h2>
+  <div id="clock">--:--:--</div>
+  <div class="row">
+    <button class="go" id="startPause">start</button>
+    <input id="dur" type="text" size="8" value="48:00:00" title="hh:mm:ss" />
+    <button id="reset">load</button>
+    <span class="muted" id="endsAt"></span>
+  </div>
+  <div class="row">
+    <button data-adj="-900">−15m</button>
+    <button data-adj="-300">−5m</button>
+    <button data-adj="-60">−1m</button>
+    <button data-adj="60">+1m</button>
+    <button data-adj="300">+5m</button>
+    <button data-adj="900">+15m</button>
+  </div>
+  <div class="row">
+    <input id="label" class="grow" placeholder="clock label" />
+    <button id="tgTimer">timer</button>
+  </div>
+</section>
+
+<section>
+  <h2>callouts</h2>
+  <div id="chips"></div>
+  <div class="row">
+    <button id="addChip">add callout</button>
+    <span class="muted">reads as “next break in 20 min” on the overlay</span>
+  </div>
+</section>
+
+<section>
+  <h2>banner</h2>
+  <div class="row">
+    <input id="ticker" class="grow" placeholder="one-line message across the bottom" />
+    <button id="tgTicker">show</button>
+  </div>
+</section>
+
+<section>
+  <h2>branding</h2>
+  <div class="row">
+    <input id="sponsorCaption" class="grow" placeholder="sponsor caption" />
+    <button id="tgSponsor">sponsor</button>
+    <button id="tgLogo">logo</button>
+  </div>
+</section>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  let state = null,
+    ws = null,
+    ids = "",
+    skew = 0; // server epoch − local epoch
+  const now = () => Date.now() + skew;
+
+  // ?key=... once, then it sticks for the bookmarked obs dock
+  const qKey = new URLSearchParams(location.search).get("key");
+  if (qKey !== null) localStorage.setItem("catalystKey", qKey);
+  const KEY = localStorage.getItem("catalystKey") ?? "";
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    ws = new WebSocket(`${proto}://${location.host}/ws?key=${encodeURIComponent(KEY)}`);
+    ws.onopen = () => {
+      $("#conn").textContent = "live";
+      $("#conn").classList.remove("down");
+    };
+    ws.onmessage = (e) => {
+      state = JSON.parse(e.data);
+      if (state.t) skew = state.t - Date.now();
+      render();
+    };
+    ws.onclose = () => {
+      $("#conn").textContent = "reconnecting";
+      $("#conn").classList.add("down");
+      setTimeout(connect, 1000);
+    };
+    ws.onerror = () => ws.close();
+  }
+  connect();
+
+  function push(patch) {
+    Object.assign(state, deep(state, patch));
+    if (ws?.readyState === 1) ws.send(JSON.stringify(patch));
+    render();
+  }
+  function deep(base, patch) {
+    if (Array.isArray(patch) || patch === null || typeof patch !== "object") return patch;
+    const out = { ...base };
+    for (const k in patch) out[k] = deep(base?.[k], patch[k]);
+    return out;
+  }
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const hms = (ms) => {
+    const t = Math.max(0, Math.round(ms / 1000));
+    return `${pad(Math.floor(t / 3600))}:${pad(Math.floor((t % 3600) / 60))}:${pad(t % 60)}`;
+  };
+  const parseDur = (s) => {
+    const p = s.split(":").map(Number).reverse();
+    return ((p[0] || 0) + (p[1] || 0) * 60 + (p[2] || 0) * 3600) * 1000;
+  };
+  const until = (ms) => {
+    if (ms <= 0) return "now";
+    const t = Math.round(ms / 1000);
+    if (t < 60) return t + "s";
+    const m = Math.round(t / 60);
+    return m < 60 ? m + " min" : `${Math.floor(m / 60)}h ${pad(m % 60)}m`;
+  };
+  const left = () =>
+    state.build.paused ? state.build.remainingMs : (state.build.endsAt ?? now()) - now();
+  const effAt = (c, t) => {
+    if (c.at === null) return null;
+    if (!c.repeat) return c.at;
+    const step = c.repeat * 60000;
+    return c.at <= t - 60000 ? c.at + Math.ceil((t - 60000 - c.at) / step) * step : c.at;
+  };
+  const clockAt = (ts) => new Date(ts - skew).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  // ---- build clock ----
+  $("#startPause").onclick = () => {
+    const b = state.build;
+    push(
+      b.paused
+        ? { build: { paused: false, endsAt: now() + b.remainingMs } }
+        : { build: { paused: true, remainingMs: Math.max(0, b.endsAt - now()) } },
+    );
+  };
+  $("#reset").onclick = () =>
+    push({ build: { paused: true, remainingMs: parseDur($("#dur").value), endsAt: null } });
+  document.querySelectorAll("[data-adj]").forEach((b) => {
+    b.onclick = () => {
+      const ms = Number(b.dataset.adj) * 1000;
+      push(
+        state.build.paused
+          ? { build: { remainingMs: Math.max(0, state.build.remainingMs + ms) } }
+          : { build: { endsAt: state.build.endsAt + ms } },
+      );
+    };
+  });
+  $("#label").oninput = (e) => push({ build: { label: e.target.value } });
+  $("#tgTimer").onclick = () => push({ show: { timer: !state.show.timer } });
+
+  // ---- callouts ----
+  $("#addChip").onclick = () =>
+    push({
+      chips: [
+        ...state.chips,
+        {
+          id: "c" + Date.now().toString(36),
+          label: "new callout",
+          at: null,
+          tone: "info",
+          repeat: 0,
+          visible: false,
+        },
+      ],
+    });
+
+  function setChip(id, patch) {
+    push({ chips: state.chips.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+  }
+
+  function buildChips() {
+    const box = $("#chips");
+    box.innerHTML = "";
+    for (const c of state.chips) {
+      const el = document.createElement("div");
+      el.className = "chip";
+      el.dataset.id = c.id;
+      el.innerHTML = `
+        <div class="row">
+          <input class="grow lbl" value="">
+          <select class="tone">
+            <option value="break">break</option>
+            <option value="recap">recap</option>
+            <option value="info">info</option>
+          </select>
+          <button class="vis">show</button>
+        </div>
+        <div class="row">
+          <span class="eta"></span>
+          <input type="number" class="mins" min="1" max="600" value="20"><button class="setIn">in</button>
+          <input type="time" class="abs"><button class="setAt">at</button>
+          <input type="number" class="rep" min="0" max="600" title="repeat every n minutes, 0 = once">
+          <span class="muted">min loop</span>
+          <button class="clr">clear</button>
+          <button class="danger del" title="delete">×</button>
+        </div>`;
+      const q = (s) => el.querySelector(s);
+      q(".lbl").value = c.label;
+      q(".lbl").oninput = (e) => setChip(c.id, { label: e.target.value });
+      q(".tone").value = c.tone;
+      q(".tone").onchange = (e) => setChip(c.id, { tone: e.target.value });
+      q(".vis").onclick = () => setChip(c.id, { visible: !cur(c.id).visible });
+      q(".setIn").onclick = () =>
+        setChip(c.id, { at: now() + Number(q(".mins").value) * 60000, visible: true });
+      q(".setAt").onclick = () => {
+        const v = q(".abs").value;
+        if (!v) return;
+        const [h, m] = v.split(":").map(Number);
+        const d = new Date();
+        d.setHours(h, m, 0, 0);
+        if (d < new Date()) d.setDate(d.getDate() + 1); // overnight build, roll forward
+        setChip(c.id, { at: d.getTime() + skew, visible: true });
+      };
+      q(".rep").value = c.repeat ?? 0;
+      q(".rep").oninput = (e) => setChip(c.id, { repeat: Number(e.target.value) || 0 });
+      q(".clr").onclick = () => setChip(c.id, { at: null });
+      q(".del").onclick = () => push({ chips: state.chips.filter((x) => x.id !== c.id) });
+      box.append(el);
+    }
+  }
+  const cur = (id) => state.chips.find((c) => c.id === id);
+
+  // ---- misc ----
+  $("#ticker").oninput = (e) => push({ ticker: { text: e.target.value } });
+  $("#tgTicker").onclick = () => push({ ticker: { visible: !state.ticker.visible } });
+  $("#sponsorCaption").oninput = (e) => push({ sponsor: { caption: e.target.value } });
+  $("#tgSponsor").onclick = () => push({ sponsor: { visible: !state.sponsor.visible } });
+  $("#tgLogo").onclick = () => push({ show: { logo: !state.show.logo } });
+
+  function setVal(el, v) {
+    if (document.activeElement !== el && el.value !== v) el.value = v;
+  }
+
+  function render() {
+    if (!state) return;
+    const l = left();
+    $("#clock").textContent = hms(l);
+    $("#clock").classList.toggle("paused", state.build.paused);
+    $("#startPause").textContent = state.build.paused ? "start" : "pause";
+    $("#startPause").classList.toggle("on", !state.build.paused);
+    $("#startPause").classList.toggle("live", !state.build.paused);
+    $("#endsAt").textContent =
+      !state.build.paused && state.build.endsAt ? "ends " + clockAt(state.build.endsAt) : "";
+    setVal($("#label"), state.build.label);
+    setVal($("#ticker"), state.ticker.text);
+    setVal($("#sponsorCaption"), state.sponsor.caption);
+    $("#tgTimer").classList.toggle("on", state.show.timer);
+    $("#tgLogo").classList.toggle("on", state.show.logo);
+    $("#tgSponsor").classList.toggle("on", state.sponsor.visible);
+    $("#tgTicker").classList.toggle("on", state.ticker.visible);
+
+    const sig = state.chips.map((c) => c.id).join(",");
+    if (sig !== ids) {
+      ids = sig;
+      buildChips();
+    }
+    for (const c of state.chips) {
+      const el = $(`.chip[data-id="${c.id}"]`);
+      if (!el) continue;
+      setVal(el.querySelector(".lbl"), c.label);
+      setVal(el.querySelector(".rep"), String(c.repeat ?? 0));
+      el.querySelector(".tone").value = c.tone;
+      el.querySelector(".vis").classList.toggle("on", c.visible);
+      const tgt = effAt(c, now());
+      el.querySelector(".eta").textContent =
+        tgt === null ? "no timer" : `${until(tgt - now())}, ${clockAt(tgt)}`;
+    }
+  }
+  setInterval(render, 500);
+</script>
