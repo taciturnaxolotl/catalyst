@@ -13,6 +13,7 @@
     --navy: #003087;
     --silver: #a5a8bc;
     --green: #25b001;
+    --amber: #d9a400;
     --bg: #0c0e14;
     --card: #161a24;
     --line: #262c3a;
@@ -69,18 +70,19 @@
     outline: 2px solid var(--green);
     outline-offset: 1px;
   }
-  input[type="number"] {
-    width: 74px;
+  input.bad {
+    border-color: #a33;
+    color: #ff8f88;
   }
-  input[type="time"] {
-    width: 110px;
+  input[type="text"].dur {
+    width: 88px;
   }
   input[type="datetime-local"] {
     width: 200px;
   }
   .grow {
     flex: 1;
-    min-width: 90px;
+    min-width: 120px;
   }
   button {
     background: #1e2432;
@@ -107,16 +109,6 @@
     border-color: var(--green);
     color: #06210b;
   }
-  .chip button,
-  .chip select {
-    padding: 8px 10px;
-  }
-  .chip input[type="number"] {
-    width: 60px;
-  }
-  .chip input[type="time"] {
-    width: 104px;
-  }
   button.danger:hover {
     background: #5a1d1d;
   }
@@ -130,19 +122,82 @@
   #clock.paused {
     color: var(--silver);
   }
-  .chip {
+
+  /* ---------- cues ---------- */
+  /* off / auto / on, one segmented control. "auto" is the whole point: the cue
+     puts itself on screen when its moment comes near. */
+  .seg {
+    display: flex;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .seg button {
+    border: 0;
+    border-radius: 0;
+    padding: 9px 10px;
+    background: #0f131c;
+    font-size: 13px;
+    color: #79809a;
+  }
+  .seg button + button {
+    border-left: 1px solid var(--line);
+  }
+  .seg button[aria-pressed="true"] {
+    background: #1e2432;
+    color: #e8eaf0;
+  }
+  .seg button[data-show="auto"][aria-pressed="true"] {
+    background: #12351c;
+    color: #7fe36b;
+  }
+  .seg button[data-show="on"][aria-pressed="true"] {
+    background: var(--green);
+    color: #06210b;
+  }
+  .cue {
     border: 1px solid var(--line);
     border-radius: 10px;
     padding: 10px;
     margin-bottom: 10px;
     background: #10141d;
   }
-  .chip .eta {
-    color: var(--green);
+  .cue .when {
+    width: 194px;
+  }
+  .cue .quick {
+    width: 112px;
+  }
+  .cue select {
+    padding: 8px 9px;
+  }
+  .cue .eta {
     font-weight: 700;
-    min-width: 62px;
+    letter-spacing: 0.01em;
+  }
+  .eta[data-status="live"],
+  .eta[data-status="pinned"] {
+    color: var(--green);
+  }
+  .eta[data-status="queued"] {
+    color: var(--amber);
+  }
+  .eta[data-status="off"],
+  .eta[data-status="lapsed"] {
+    color: #79809a;
   }
   .muted {
+    color: #79809a;
+  }
+  #air {
+    border-left: 3px solid var(--green);
+    padding-left: 10px;
+    margin-bottom: 12px;
+    line-height: 1.5;
+    min-height: 21px;
+  }
+  #air.empty {
+    border-color: var(--line);
     color: #79809a;
   }
   #conn {
@@ -160,7 +215,7 @@
   <div id="clock">--:--:--</div>
   <div class="row">
     <button class="go" id="startPause">start</button>
-    <input id="dur" type="text" size="8" value="48:00:00" title="hh:mm:ss" />
+    <input id="dur" class="dur" type="text" value="48:00:00" title="hh:mm:ss" />
     <button id="reset">load</button>
     <span class="muted" id="endsAt"></span>
   </div>
@@ -184,19 +239,17 @@
 </section>
 
 <section>
-  <h2>callouts</h2>
-  <div id="chips"></div>
+  <h2>cues</h2>
+  <div id="air" class="empty">nothing on screen</div>
+  <div id="cues"></div>
   <div class="row">
-    <button id="addChip">add callout</button>
-    <span class="muted">reads as “next break in 20 min” on the overlay</span>
-  </div>
-</section>
-
-<section>
-  <h2>banner</h2>
-  <div class="row">
-    <input id="ticker" class="grow" placeholder="one-line message across the bottom" />
-    <button id="tgTicker">show</button>
+    <button id="addCallout">+ callout</button>
+    <button id="addBanner">+ banner</button>
+    <button id="sort">sort by time</button>
+    <span class="muted"
+      >pick a date for anything days out; the second box is the shortcut — <b>20</b> in 20 min ·
+      <b>1h30</b> · <b>2:15am</b> tonight</span
+    >
   </div>
 </section>
 
@@ -209,7 +262,9 @@
   </div>
 </section>
 
-<script>
+<script type="module">
+  import { target, status, onAir, until } from "/cue.js";
+
   const $ = (s) => document.querySelector(s);
   let state = null,
     ws = null,
@@ -264,27 +319,15 @@
     const p = s.split(":").map(Number).reverse();
     return ((p[0] || 0) + (p[1] || 0) * 60 + (p[2] || 0) * 3600) * 1000;
   };
-  const until = (ms) => {
-    if (ms <= 0) return "now";
-    const t = Math.round(ms / 1000);
-    if (t < 60) return t + "s";
-    const m = Math.round(t / 60);
-    return m < 60 ? m + " min" : `${Math.floor(m / 60)}h ${pad(m % 60)}m`;
-  };
   const left = () =>
     state.build.paused ? state.build.remainingMs : (state.build.endsAt ?? now()) - now();
-  const effAt = (c, t) => {
-    if (c.at === null) return null;
-    if (!c.repeat) return c.at;
-    const step = c.repeat * 60000;
-    return c.at <= t - 60000 ? c.at + Math.ceil((t - 60000 - c.at) / step) * step : c.at;
-  };
   // yyyy-mm-ddThh:mm in the operator's local time, what datetime-local wants
   const localStamp = (ts) => {
     const d = new Date(ts - skew);
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
-  const clockAt = (ts) => new Date(ts - skew).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const clockAt = (ts) =>
+    new Date(ts - skew).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
   // ---- build clock ----
   $("#startPause").onclick = () => {
@@ -317,81 +360,153 @@
   $("#label").oninput = (e) => push({ build: { label: e.target.value } });
   $("#tgTimer").onclick = () => push({ show: { timer: !state.show.timer } });
 
-  // ---- callouts ----
-  $("#addChip").onclick = () =>
+  // ---- the shortcut box: every way an operator says a time in a hurry ----
+  // "20" / "+20" / "90m" → minutes out. "1h30" → hours and minutes out.
+  // "2:15am" / "14:30" → that wall clock, rolling to tomorrow if it's past.
+  // anything further out is the date picker's job. undefined back means it didn't parse.
+  function parseWhen(raw, t) {
+    const s = raw.trim().toLowerCase();
+    if (!s || s === "-" || s === "—") return null;
+    if (s === "now") return t;
+
+    const abs = s.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+    if (abs && (abs[2] !== undefined || abs[3])) {
+      let h = Number(abs[1]);
+      if (abs[3]) h = (h % 12) + (abs[3] === "pm" ? 12 : 0);
+      const d = new Date(t - skew);
+      d.setHours(h, Number(abs[2] ?? 0), 0, 0);
+      if (d.getTime() < t - skew) d.setDate(d.getDate() + 1); // overnight build, roll forward
+      return d.getTime() + skew;
+    }
+
+    const rel = s.replace(/^\+/, "").match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*(?:m|min)?)?$/);
+    if (rel && (rel[1] || rel[2]))
+      return t + ((Number(rel[1] ?? 0) * 60 + Number(rel[2] ?? 0)) * 60000);
+    return undefined;
+  }
+  // the picker doubles as the readout, so it always shows where the cue actually
+  // landed — for a repeat, that's the next roll rather than the original anchor
+  const showWhen = (c) => (c.at === null ? "" : localStamp(target(c, now())));
+
+  const WORDS = {
+    live: "on screen",
+    pinned: "pinned on screen",
+    queued: "queued",
+    lapsed: "done",
+    off: "off",
+  };
+
+  // ---- cues ----
+  const EVERY = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+  const LEAD = [null, 5, 10, 15, 30, 60, 120];
+  const opt = (v, t, sel) => `<option value="${v}"${v === sel ? " selected" : ""}>${t}</option>`;
+  // a value POSTed to /state that isn't on the menu still has to be selectable,
+  // or the panel would silently misreport what the overlay is doing
+  const withCur = (list, v) => (list.includes(v) ? list : [...list, v].sort((a, b) => a - b));
+
+  const add = (kind) =>
     push({
-      chips: [
-        ...state.chips,
+      cues: [
+        ...state.cues,
         {
           id: "c" + Date.now().toString(36),
-          label: "new callout",
-          at: null,
+          kind,
+          label: kind === "banner" ? "" : "new callout",
           tone: "info",
-          repeat: 0,
-          visible: false,
+          at: null,
+          every: 0,
+          lead: null,
+          hold: 2,
+          show: "off",
         },
       ],
     });
+  $("#addCallout").onclick = () => add("callout");
+  $("#addBanner").onclick = () => add("banner");
+  // explicit, so cards never reshuffle under a cursor mid-edit
+  $("#sort").onclick = () =>
+    push({
+      cues: [...state.cues].sort(
+        (a, b) => (target(a, now()) ?? Infinity) - (target(b, now()) ?? Infinity),
+      ),
+    });
 
-  function setChip(id, patch) {
-    push({ chips: state.chips.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
+  const cur = (id) => state.cues.find((c) => c.id === id);
+  function setCue(id, patch) {
+    push({ cues: state.cues.map((c) => (c.id === id ? { ...c, ...patch } : c)) });
   }
 
-  function buildChips() {
-    const box = $("#chips");
+  function buildCues() {
+    const box = $("#cues");
     box.innerHTML = "";
-    for (const c of state.chips) {
+    for (const c of state.cues) {
       const el = document.createElement("div");
-      el.className = "chip";
+      el.className = "cue";
       el.dataset.id = c.id;
       el.innerHTML = `
         <div class="row">
-          <input class="grow lbl" value="">
-          <select class="tone">
-            <option value="break">break</option>
-            <option value="recap">recap</option>
-            <option value="info">info</option>
-          </select>
-          <button class="vis">show</button>
+          <div class="seg">
+            <button data-show="off">off</button>
+            <button data-show="auto" title="on screen when its moment comes near">auto</button>
+            <button data-show="on" title="on screen until you say otherwise">on</button>
+          </div>
+          <input class="grow lbl" placeholder="message">
+          <button class="danger del" title="delete">×</button>
         </div>
         <div class="row">
+          <input class="when" type="datetime-local" title="the moment this cue is for">
+          <input class="quick" placeholder="20 · 2:15am" title="type a time and hit enter">
+          <select class="every">${withCur(EVERY, c.every).map((v) => opt(v, v ? `every ${v}m` : "once", c.every)).join("")}</select>
+          <select class="lead">${withCur(LEAD, c.lead).map((v) => opt(v, v === null ? "show always" : `show ${v}m ahead`, c.lead)).join("")}</select>
+          <select class="kind">${opt("callout", "callout", c.kind)}${opt("banner", "banner", c.kind)}</select>
+          <select class="tone">${["break", "recap", "info"].map((v) => opt(v, v, c.tone)).join("")}</select>
+          <button class="bump" title="push back 5 minutes">+5m</button>
           <span class="eta"></span>
-          <input type="number" class="mins" min="1" max="600" value="20"><button class="setIn">in</button>
-          <input type="time" class="abs"><button class="setAt">at</button>
-          <input type="number" class="rep" min="0" max="600" title="repeat every n minutes, 0 = once">
-          <span class="muted">min loop</span>
-          <button class="clr">clear</button>
-          <button class="danger del" title="delete">×</button>
         </div>`;
       const q = (s) => el.querySelector(s);
-      q(".lbl").value = c.label;
-      q(".lbl").oninput = (e) => setChip(c.id, { label: e.target.value });
-      q(".tone").value = c.tone;
-      q(".tone").onchange = (e) => setChip(c.id, { tone: e.target.value });
-      q(".vis").onclick = () => setChip(c.id, { visible: !cur(c.id).visible });
-      q(".setIn").onclick = () =>
-        setChip(c.id, { at: now() + Number(q(".mins").value) * 60000, visible: true });
-      q(".setAt").onclick = () => {
-        const v = q(".abs").value;
-        if (!v) return;
-        const [h, m] = v.split(":").map(Number);
-        const d = new Date();
-        d.setHours(h, m, 0, 0);
-        if (d < new Date()) d.setDate(d.getDate() + 1); // overnight build, roll forward
-        setChip(c.id, { at: d.getTime() + skew, visible: true });
+
+      q(".lbl").oninput = (e) => setCue(c.id, { label: e.target.value });
+      q(".del").onclick = () => push({ cues: state.cues.filter((x) => x.id !== c.id) });
+      el.querySelectorAll(".seg button").forEach((b) => {
+        b.onclick = () => setCue(c.id, { show: b.dataset.show });
+      });
+
+      // giving a cue a time is how you arm it; nobody sets a time meaning "stay off".
+      // clearing it back to null leaves the cue alone as a plain message.
+      const setAt = (at) =>
+        setCue(c.id, { at, show: at !== null && cur(c.id).show === "off" ? "auto" : cur(c.id).show });
+
+      const when = q(".when");
+      when.onchange = () =>
+        setAt(when.value ? new Date(when.value).getTime() + skew : null); // typed local, stored on the server's clock
+
+      // the shortcut box is a command, not a field: it commits and empties itself,
+      // so the picker beside it is the only thing that ever reads as the cue's time
+      const quick = q(".quick");
+      quick.oninput = () => quick.classList.remove("bad");
+      quick.onkeydown = (e) => {
+        if (e.key !== "Enter") return;
+        const at = parseWhen(quick.value, now());
+        quick.classList.toggle("bad", at === undefined);
+        if (at === undefined) return;
+        quick.value = "";
+        setAt(at);
       };
-      q(".rep").value = c.repeat ?? 0;
-      q(".rep").oninput = (e) => setChip(c.id, { repeat: Number(e.target.value) || 0 });
-      q(".clr").onclick = () => setChip(c.id, { at: null });
-      q(".del").onclick = () => push({ chips: state.chips.filter((x) => x.id !== c.id) });
+
+      q(".every").onchange = (e) => setCue(c.id, { every: Number(e.target.value) });
+      q(".lead").onchange = (e) =>
+        setCue(c.id, { lead: e.target.value === "null" ? null : Number(e.target.value) });
+      q(".kind").onchange = (e) => setCue(c.id, { kind: e.target.value });
+      q(".tone").onchange = (e) => setCue(c.id, { tone: e.target.value });
+      q(".bump").onclick = () => {
+        const c2 = cur(c.id);
+        setCue(c.id, { at: (target(c2, now()) ?? now()) + 300000 });
+      };
       box.append(el);
     }
   }
-  const cur = (id) => state.chips.find((c) => c.id === id);
 
   // ---- misc ----
-  $("#ticker").oninput = (e) => push({ ticker: { text: e.target.value } });
-  $("#tgTicker").onclick = () => push({ ticker: { visible: !state.ticker.visible } });
   $("#sponsorCaption").oninput = (e) => push({ sponsor: { caption: e.target.value } });
   $("#tgSponsor").onclick = () => push({ sponsor: { visible: !state.sponsor.visible } });
   $("#tgLogo").onclick = () => push({ show: { logo: !state.show.logo } });
@@ -402,6 +517,7 @@
 
   function render() {
     if (!state) return;
+    const t = now();
     const l = left();
     $("#clock").textContent = hms(l);
     $("#clock").classList.toggle("paused", state.build.paused);
@@ -410,30 +526,50 @@
     $("#startPause").classList.toggle("live", !state.build.paused);
     $("#endsAt").textContent =
       !state.build.paused && state.build.endsAt ? "ends " + clockAt(state.build.endsAt) : "";
-    setVal($("#endInput"), localStamp(state.build.paused ? now() + l : state.build.endsAt ?? now()));
+    setVal($("#endInput"), localStamp(state.build.paused ? t + l : (state.build.endsAt ?? t)));
     setVal($("#label"), state.build.label);
-    setVal($("#ticker"), state.ticker.text);
     setVal($("#sponsorCaption"), state.sponsor.caption);
     $("#tgTimer").classList.toggle("on", state.show.timer);
     $("#tgLogo").classList.toggle("on", state.show.logo);
     $("#tgSponsor").classList.toggle("on", state.sponsor.visible);
-    $("#tgTicker").classList.toggle("on", state.ticker.visible);
 
-    const sig = state.chips.map((c) => c.id).join(",");
+    const sig = state.cues.map((c) => c.id).join(",");
     if (sig !== ids) {
       ids = sig;
-      buildChips();
+      buildCues();
     }
-    for (const c of state.chips) {
-      const el = $(`.chip[data-id="${c.id}"]`);
+
+    // what the overlay is actually showing, so the panel is trustworthy without alt-tabbing
+    const air = state.cues.filter((c) => onAir(c, t) && (c.kind === "callout" || c.label));
+    $("#air").classList.toggle("empty", !air.length);
+    $("#air").textContent = air.length
+      ? air
+          .map((c) => {
+            const tgt = target(c, t);
+            return c.label + (tgt === null ? "" : ` — ${until(tgt - t)}`);
+          })
+          .join(" · ")
+      : "nothing on screen";
+
+    for (const c of state.cues) {
+      const el = $(`.cue[data-id="${c.id}"]`);
       if (!el) continue;
       setVal(el.querySelector(".lbl"), c.label);
-      setVal(el.querySelector(".rep"), String(c.repeat ?? 0));
+      setVal(el.querySelector(".when"), showWhen(c));
+      el.querySelector(".every").value = String(c.every);
+      el.querySelector(".lead").value = String(c.lead);
+      el.querySelector(".kind").value = c.kind;
       el.querySelector(".tone").value = c.tone;
-      el.querySelector(".vis").classList.toggle("on", c.visible);
-      const tgt = effAt(c, now());
+      el.querySelector(".tone").style.display = c.kind === "callout" ? "" : "none";
+      el.querySelectorAll(".seg button").forEach((b) =>
+        b.setAttribute("aria-pressed", String(b.dataset.show === c.show)),
+      );
+
+      const st = status(c, t);
+      const tgt = target(c, t);
+      el.querySelector(".eta").dataset.status = st;
       el.querySelector(".eta").textContent =
-        tgt === null ? "no timer" : `${until(tgt - now())}, ${clockAt(tgt)}`;
+        tgt === null ? WORDS[st] : `${WORDS[st]} · ${until(tgt - t)}`;
     }
   }
   setInterval(render, 500);

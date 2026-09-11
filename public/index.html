@@ -152,7 +152,7 @@
     white-space: nowrap;
     color: var(--silver);
   }
-  .chip .val {
+  .val {
     font-weight: 800;
     color: var(--paper);
     margin-left: 12px;
@@ -160,7 +160,7 @@
   .chip[data-tone="recap"] .val {
     color: var(--green);
   }
-  .chip.imminent .val {
+  .imminent .val {
     animation: blink 1s steps(1, end) infinite;
   }
   @keyframes chipIn {
@@ -200,7 +200,7 @@
     width: 210px;
     filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
   }
-  #ticker {
+  #banner {
     background: #0a0a0a;
     color: var(--paper);
     padding: 12px 28px 14px;
@@ -209,6 +209,7 @@
     font-stretch: 92%;
     font-size: 30px;
     max-width: 1100px;
+    animation: chipIn 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.2);
   }
 
   .hide {
@@ -222,7 +223,7 @@
       <div id="timerLabel">build time left</div>
       <div id="clock">--:--:--</div>
     </div>
-    <div id="chips"></div>
+    <div id="callouts"></div>
   </div>
 
   <div class="edge tr">
@@ -232,15 +233,16 @@
     </div>
   </div>
 
-  <div class="edge bc"><div id="ticker" class="patch hide"></div></div>
+  <div class="edge bc"><div id="banner" class="patch hide"></div></div>
   <div class="edge br"><img id="logo" src="/assets/ozone-logo.png" alt="Ozone Robotics 4611" /></div>
 </div>
 
-<script>
+<script type="module">
+  import { target, onAir, until } from "/cue.js";
+
   const $ = (s) => document.querySelector(s);
   let state = null,
     skew = 0; // server epoch − local epoch, so a laptop with a wrong clock still agrees
-  const now = () => Date.now() + skew;
 
   function fit() {
     const s = Math.min(innerWidth / 1920, innerHeight / 1080);
@@ -271,24 +273,19 @@
     return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
   }
 
-  // "20 min" / "1h 05m" / "45s" / "now"
-  function until(ms) {
-    if (ms <= 0) return "now";
-    const t = Math.round(ms / 1000);
-    if (t < 60) return `${t}s`;
-    const m = Math.round(t / 60);
-    if (m < 60) return `${m} min`;
-    return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
-  }
+  const esc = (s) => s.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]);
 
-  // repeating callouts roll forward as a pure function of state — no server tick,
-  // so every tab lands on the same target even after a hibernated socket wakes up
-  function effAt(ch, t) {
-    if (ch.at === null) return null;
-    if (!ch.repeat) return ch.at;
-    const step = ch.repeat * 60000;
-    return ch.at <= t - 60000 ? ch.at + Math.ceil((t - 60000 - ch.at) / step) * step : ch.at;
+  // one cue reads as "next break in 20 min", or just its label when it has no target
+  function line(c, now) {
+    const tgt = target(c, now);
+    return tgt === null
+      ? esc(c.label)
+      : `${esc(c.label)} <span class="val">${until(tgt - now)}</span>`;
   }
+  const imminent = (c, now) => {
+    const tgt = target(c, now);
+    return tgt !== null && tgt - now <= 60000;
+  };
 
   function render() {
     if (!state) return;
@@ -304,44 +301,46 @@
     c.classList.toggle("done", left <= 0);
     c.textContent = left <= 0 ? "00:00:00" : hms(left);
 
-    // chips
-    const box = $("#chips");
-    const want = state.chips.filter(
-      (ch) => ch.visible && (ch.at === null || ch.repeat > 0 || ch.at - now > -120000),
-    );
+    // callouts — the cue list decides what is on screen, on its own schedule
+    const live = state.cues.filter((cue) => onAir(cue, now));
+    const box = $("#callouts");
+    const want = live.filter((cue) => cue.kind === "callout");
     for (const el of [...box.children]) if (!want.find((w) => w.id === el.dataset.id)) el.remove();
-    for (const ch of want) {
-      let el = box.querySelector(`[data-id="${ch.id}"]`);
+    for (const cue of want) {
+      let el = box.querySelector(`[data-id="${cue.id}"]`);
       if (!el) {
         el = document.createElement("div");
         el.className = "chip patch";
-        el.dataset.id = ch.id;
+        el.dataset.id = cue.id;
         el.innerHTML = `<div class="bar"></div><div class="txt"></div>`;
         box.append(el);
       }
-      el.dataset.tone = ch.tone;
-      const tgt = effAt(ch, now);
-      const rem = tgt === null ? null : tgt - now;
-      el.classList.toggle("imminent", rem !== null && rem <= 60000);
-      el.querySelector(".txt").innerHTML =
-        rem === null ? esc(ch.label) : `${esc(ch.label)} <span class="val">${until(rem)}</span>`;
+      el.dataset.tone = cue.tone;
+      el.classList.toggle("imminent", imminent(cue, now));
+      el.querySelector(".txt").innerHTML = line(cue, now);
     }
     // only touch the dom when the order actually changed — re-appending restarts the css animation
     const have = [...box.children].map((e) => e.dataset.id).join(",");
     if (have !== want.map((c) => c.id).join(",")) {
-      want.forEach((ch) => box.append(box.querySelector(`[data-id="${ch.id}"]`)));
+      want.forEach((cue) => box.append(box.querySelector(`[data-id="${cue.id}"]`)));
     }
 
-    // sponsor + logo + ticker
+    // banner — first live one wins, the bottom bar only fits one line
+    const bn = live.find((cue) => cue.kind === "banner" && cue.label);
+    const bar = $("#banner");
+    bar.classList.toggle("hide", !bn);
+    if (bn) {
+      bar.classList.toggle("imminent", imminent(bn, now));
+      if (bar.dataset.id !== bn.id) bar.dataset.id = bn.id;
+      bar.innerHTML = line(bn, now);
+    }
+
+    // sponsor + logo
     $("#sponsor").classList.toggle("hide", !state.sponsor.visible);
     $("#sponsorCaption").textContent = state.sponsor.caption;
     $("#sponsorCaption").style.display = state.sponsor.caption ? "" : "none";
     $("#logo").classList.toggle("hide", !state.show.logo);
-    const tk = $("#ticker");
-    tk.classList.toggle("hide", !state.ticker.visible || !state.ticker.text);
-    tk.textContent = state.ticker.text;
   }
 
-  const esc = (s) => s.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]);
   setInterval(render, 250);
 </script>

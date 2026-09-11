@@ -3,35 +3,77 @@
 
 import { DurableObject } from "cloudflare:workers";
 
-type Chip = {
+// a cue is one thing that happens at a moment. what's on screen is derived from
+// `at`/`lead`/`hold` on every frame, so the whole 48h can be queued up front and
+// there is still no server tick and no alarm to drift.
+type Cue = {
   id: string;
+  kind: "callout" | "banner"; // top-left chip, or the bar across the bottom
   label: string;
-  at: number | null; // epoch ms target; null = static label
   tone: "break" | "recap" | "info";
-  repeat: number; // minutes; 0 = one-shot. clients derive the rolled target, no server tick
-  visible: boolean;
+  at: number | null; // epoch ms target; null = no countdown, just a message
+  every: number; // repeat minutes; 0 = one-shot
+  lead: number | null; // appears this many minutes ahead; null = as soon as it exists
+  hold: number; // minutes it lingers on screen after its moment passes
+  show: "off" | "auto" | "on"; // never / on schedule / pinned
 };
 
 type State = {
   v: number;
   build: { label: string; endsAt: number | null; remainingMs: number; paused: boolean };
-  chips: Chip[];
+  cues: Cue[];
   sponsor: { caption: string; visible: boolean };
-  ticker: { text: string; visible: boolean };
   show: { timer: boolean; logo: boolean };
 };
 
+const cue = (c: Partial<Cue> & { id: string; label: string }): Cue => ({
+  kind: "callout",
+  tone: "info",
+  at: null,
+  every: 0,
+  lead: null,
+  hold: 2,
+  show: "off",
+  ...c,
+});
+
 const DEFAULT: State = {
-  v: 1,
+  v: 2,
   build: { label: "build time left", endsAt: null, remainingMs: 48 * 3600_000, paused: true },
-  chips: [
-    { id: "break", label: "next break", at: null, tone: "break", repeat: 0, visible: false },
-    { id: "recap", label: "next live recap", at: null, tone: "recap", repeat: 30, visible: false },
+  cues: [
+    cue({ id: "break", label: "next break", tone: "break" }),
+    cue({ id: "recap", label: "next live recap", tone: "recap", every: 30 }),
   ],
   sponsor: { caption: "sheet metal by", visible: true },
-  ticker: { text: "", visible: false },
   show: { timer: true, logo: true },
 };
+
+// v1 kept chips (visible/at/repeat) and a separate ticker; both are cues now.
+function migrate(old: any): State {
+  if (!old || typeof old !== "object") return DEFAULT;
+  if (old.v >= 2) return { ...DEFAULT, ...old };
+  const cues: Cue[] = (old.chips ?? []).map((c: any) =>
+    cue({
+      id: c.id,
+      label: c.label,
+      tone: c.tone,
+      at: c.at ?? null,
+      every: c.repeat || 0,
+      show: c.visible ? "auto" : "off",
+    }),
+  );
+  if (old.ticker?.text)
+    cues.push(
+      cue({
+        id: "banner",
+        kind: "banner",
+        label: old.ticker.text,
+        show: old.ticker.visible ? "on" : "off",
+      }),
+    );
+  const { chips, ticker, ...rest } = old;
+  return { ...DEFAULT, ...rest, v: 2, cues };
+}
 
 export interface Env {
   OVERLAY: DurableObjectNamespace<OverlayState>;
@@ -45,7 +87,7 @@ export class OverlayState extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.blockConcurrencyWhile(async () => {
-      this.state = { ...DEFAULT, ...((await ctx.storage.get<State>("state")) ?? {}) };
+      this.state = migrate(await ctx.storage.get<State>("state"));
     });
   }
 

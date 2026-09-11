@@ -3,8 +3,8 @@
 ![the overlay](docs/preview.png)
 
 OBS stream overlay for FRC 4611 Ozone Robotics' FTC RI48H build, "Catalyst" — a 48-hour build
-clock, callouts the operator can conjure mid-stream ("next break in 20 min"), a sponsor block
-and the team mark. runs on cloudflare workers.
+clock, cues that put themselves on screen when their moment comes near ("next break in 20 min"),
+a sponsor block and the team mark. runs on cloudflare workers.
 
 a Worker plus one Durable Object holds the state, and every open tab (OBS browser source,
 operator panel, anyone's phone) keeps a hibernating websocket to it, so an edit is on screen in
@@ -50,7 +50,7 @@ source URL is memorable at 4am.
    "shutdown when not visible" off.
 2. **Docks → Custom Browser Docks**, URL `https://catalyst.<your-domain>/control?key=…`.
 
-## clock and callouts
+## clock
 
 `load` parks a duration, `start` stamps an absolute `endsAt`. the countdown is derived from
 that timestamp on every frame, so a refreshed browser source, an OBS restart, or a laptop
@@ -59,14 +59,32 @@ state. ± shifts whichever of the two is live. **end at** takes the other road: 
 date and time, and the clock starts and runs down to exactly that moment. the field prefills with
 wherever the clock currently lands, so it doubles as a readout.
 
-callouts render as "next break in 20 min" — `45s` / `20 min` / `1h 05m` / `now`, blinking under
-a minute, self-removing 2 minutes after they lapse.
+## cues
 
-- **in** — now + n minutes. the 3am path: type `20`, hit `in`.
-- **at** — a wall clock time, rolling to tomorrow if it's already past.
-- **min loop** — `30` means it repeats. the roll is computed from `at + k·repeat`, a pure
-  function of the stored state, so there's no server tick, no alarm, and a tab that wakes from
-  hibernation lands on the same target as everyone else.
+a cue is one thing that happens at a moment. that's the whole model — what's on screen is
+derived from it, never toggled by hand.
+
+| field | what |
+| --- | --- |
+| **when** | a date and time picker — the cue's moment, however many days out. empty for no countdown |
+| **shortcut** | types the moment in a hurry: `20` (in 20 min), `1h30`, `2:15am`, `14:30`, `now`. commits on enter and empties itself, so the picker stays the only readout |
+| **every** | repeat, or `once` |
+| **show _n_ ahead** | it appears this long before its moment. `show always` for the old behaviour |
+| **off / auto / on** | never on screen / on its own schedule / pinned until you say otherwise |
+| **callout / banner** | the stacked chips under the clock, or the bar across the bottom |
+
+so the 3am path is still two keystrokes — type `20` in a break cue's shortcut box, hit enter —
+but the whole weekend can be booked before the stream starts. set saturday's inspection to `show
+60m ahead` and it surfaces an hour out on its own, then retires two minutes after it lapses.
+
+callouts render as "next break in 20 min" — `45s` / `20 min` / `1h 05m` / `3d 4h` / `now`,
+blinking under a minute. one banner shows at a time, the first one live.
+
+none of it needs a server tick or an alarm. a repeating cue's target is `at + k·every`, a pure
+function of the stored state, and visibility is a pure function of that target, so a tab waking
+from hibernation lands on the same second as every other tab. `public/cue.js` holds that
+derivation and both pages import it, so the overlay and the panel cannot disagree about what's
+on screen — the panel's top line is the same computation the overlay renders.
 
 every broadcast carries the DO's `Date.now()`, and clients keep a skew offset from it. a phone
 with a wrong clock setting a break for "in 20 min" still lands on the right second on stream.
@@ -75,12 +93,13 @@ with a wrong clock setting a break for "in 20 min" still lands on the right seco
 
 ```bash
 K=your-key
-curl -X POST "https://catalyst.example/state?key=$K" -d '{"ticker":{"text":"drivetrain v2 on the router","visible":true}}'
 curl -X POST "https://catalyst.example/state?key=$K" -d '{"show":{"timer":false,"logo":false},"sponsor":{"visible":false}}'
 curl https://catalyst.example/state
 ```
 
-good enough to drive from a stream deck without opening the panel.
+`cues` is an array, so it replaces wholesale — read `/state` first, edit, post it back. good
+enough to drive from a stream deck without opening the panel. state saved by an older build
+(`chips` plus a separate `ticker`) migrates to cues on first read.
 
 ## if the venue wifi dies
 
@@ -100,9 +119,6 @@ thousand requests. it fits in the free tier.
 210px); `ozone-gear.png` and `ozone-wordmark-white.png` are spares. palette is sampled off the
 team logo and sits at the top of `public/index.html`: navy `#003087`, silver `#a5a8bc`,
 green `#25b001`.
-
-pushing to `main` deploys via `.github/workflows/deploy.yml` — needs a `CLOUDFLARE_API_TOKEN`
-repo secret with the *Edit Cloudflare Workers* template.
 
 MIT. the Ozone 4611 and OshCut marks in `public/assets/` are their owners' and aren't covered
 by it.
