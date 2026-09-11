@@ -75,6 +75,9 @@
   input[type="time"] {
     width: 110px;
   }
+  input[type="datetime-local"] {
+    width: 200px;
+  }
   .grow {
     flex: 1;
     min-width: 90px;
@@ -160,6 +163,11 @@
     <input id="dur" type="text" size="8" value="48:00:00" title="hh:mm:ss" />
     <button id="reset">load</button>
     <span class="muted" id="endsAt"></span>
+  </div>
+  <div class="row">
+    <input id="endInput" type="datetime-local" />
+    <button id="setEnd">end at</button>
+    <span class="muted">run until a wall clock moment</span>
   </div>
   <div class="row">
     <button data-adj="-900">−15m</button>
@@ -271,6 +279,11 @@
     const step = c.repeat * 60000;
     return c.at <= t - 60000 ? c.at + Math.ceil((t - 60000 - c.at) / step) * step : c.at;
   };
+  // yyyy-mm-ddThh:mm in the operator's local time, what datetime-local wants
+  const localStamp = (ts) => {
+    const d = new Date(ts - skew);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
   const clockAt = (ts) => new Date(ts - skew).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   // ---- build clock ----
@@ -284,6 +297,13 @@
   };
   $("#reset").onclick = () =>
     push({ build: { paused: true, remainingMs: parseDur($("#dur").value), endsAt: null } });
+  // an absolute end time is the same thing as a running clock, so it starts one
+  $("#setEnd").onclick = () => {
+    const v = $("#endInput").value;
+    if (!v) return;
+    const ts = new Date(v).getTime() + skew; // typed in local time, stored on the server's clock
+    push({ build: { paused: false, endsAt: ts, remainingMs: Math.max(0, ts - now()) } });
+  };
   document.querySelectorAll("[data-adj]").forEach((b) => {
     b.onclick = () => {
       const ms = Number(b.dataset.adj) * 1000;
@@ -390,6 +410,7 @@
     $("#startPause").classList.toggle("live", !state.build.paused);
     $("#endsAt").textContent =
       !state.build.paused && state.build.endsAt ? "ends " + clockAt(state.build.endsAt) : "";
+    setVal($("#endInput"), localStamp(state.build.paused ? now() + l : state.build.endsAt ?? now()));
     setVal($("#label"), state.build.label);
     setVal($("#ticker"), state.ticker.text);
     setVal($("#sponsorCaption"), state.sponsor.caption);

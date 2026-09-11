@@ -55,7 +55,9 @@ source URL is memorable at 4am.
 `load` parks a duration, `start` stamps an absolute `endsAt`. the countdown is derived from
 that timestamp on every frame, so a refreshed browser source, an OBS restart, or a laptop
 reboot all pick up exactly where the clock actually is. `pause` folds the remainder back into
-state. ± shifts whichever of the two is live.
+state. ± shifts whichever of the two is live. **end at** takes the other road: pick a wall clock
+date and time, and the clock starts and runs down to exactly that moment. the field prefills with
+wherever the clock currently lands, so it doubles as a readout.
 
 callouts render as "next break in 20 min" — `45s` / `20 min` / `1h 05m` / `now`, blinking under
 a minute, self-removing 2 minutes after they lapse.
